@@ -10,10 +10,10 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-API_KEY    = os.environ.get("BINANCE_API_KEY", "")
+API_KEY = os.environ.get("BINANCE_API_KEY", "")
 API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
-WH_SECRET  = os.environ.get("WEBHOOK_SECRET", "mysecret123")
-TESTNET    = os.environ.get("TESTNET", "true").lower() == "true"
+WH_SECRET = os.environ.get("WEBHOOK_SECRET", "mysecret123")
+TESTNET = os.environ.get("TESTNET", "true").lower() == "true"
 
 if TESTNET:
     client = Client(API_KEY, API_SECRET, testnet=True)
@@ -21,14 +21,17 @@ else:
     client = Client(API_KEY, API_SECRET)
 
 def place_order(symbol, side, quantity):
-    order_side = SIDE_BUY if side.lower() == "buy" else SIDE_SELL
+    if side.lower() == "buy":
+        order_side = SIDE_BUY
+    else:
+        order_side = SIDE_SELL
     order = client.create_order(
         symbol=symbol.upper(),
         side=order_side,
         type=ORDER_TYPE_MARKET,
         quantity=quantity
     )
-    logger.info(f"Order placed: {side} {quantity} {symbol}")
+    logger.info("Order placed")
     return order
 
 def get_balance(asset="USDT"):
@@ -44,7 +47,7 @@ def webhook():
         return jsonify({"error": "Unauthorized"}), 401
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "BTCUSDT").upper()
-    qty    = data.get("qty", "0.001")
+    qty = data.get("qty", "0.001")
     if action not in ["buy", "sell"]:
         return jsonify({"error": "Invalid action"}), 400
     order = place_order(symbol, action, qty)
@@ -59,12 +62,16 @@ def webhook():
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "running", "mode": "TESTNET" if TESTNET else "LIVE"})
+    if TESTNET:
+        mode = "TESTNET"
+    else:
+        mode = "LIVE"
+    return jsonify({"status": "running", "mode": mode})
 
 @app.route("/balance", methods=["GET"])
 def balance():
     usdt = get_balance("USDT")
-    btc  = get_balance("BTC")
+    btc = get_balance("BTC")
     return jsonify({"USDT": usdt, "BTC": btc})
 
 @app.route("/health", methods=["GET"])
@@ -72,4 +79,5 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    port​​​​​​​​​​​​​​​​
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
