@@ -1,42 +1,46 @@
 from flask import Flask, request, jsonify
-from binance.client import Client
-from binance.enums import *
 import os
 import logging
+import requests
 from datetime import datetime
 
 app = Flask(__name__)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-API_KEY = os.environ.get("BINANCE_API_KEY", "")
-API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
+API_KEY = os.environ.get("DELTA_API_KEY", "")
+API_SECRET = os.environ.get("DELTA_API_SECRET", "")
 WH_SECRET = os.environ.get("WEBHOOK_SECRET", "mysecret123")
-TESTNET = os.environ.get("TESTNET", "true").lower() == "true"
 
-if TESTNET:
-    client = Client(API_KEY, API_SECRET, testnet=True)
-else:
-    client = Client(API_KEY, API_SECRET)
+BASE_URL = "https://api.india.delta.exchange"
 
-def place_order(symbol, side, quantity):
-    if side.lower() == "buy":
-        order_side = SIDE_BUY
-    else:
-        order_side = SIDE_SELL
-    order = client.create_order(
-        symbol=symbol.upper(),
-        side=order_side,
-        type=ORDER_TYPE_MARKET,
-        quantity=quantity
-    )
-    logger.info("Order placed")
-    return order
+def get_headers():
+    import hashlib
+    import hmac
+    import time
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        API_SECRET.encode(),
+        timestamp.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return {
+        "api-key": API_KEY,
+        "timestamp": timestamp,
+        "signature": signature,
+        "Content-Type": "application/json"
+    }
 
-def get_balance(asset="USDT"):
-    balance = client.get_asset_balance(asset=asset)
-    return float(balance['free'])
+def place_order(symbol, side, size):
+    url = BASE_URL + "/v2/orders"
+    data = {
+        "product_symbol": symbol,
+        "side": side,
+        "order_type": "market_order",
+        "size": int(size)
+    }
+    response = requests.post(url, json=data, headers=get_headers())
+    return response.json()
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -46,33 +50,23 @@ def webhook():
     if data.get("secret") != WH_SECRET:
         return jsonify({"error": "Unauthorized"}), 401
     action = data.get("action", "").lower()
-    symbol = data.get("symbol", "BTCUSDT").upper()
-    qty = data.get("qty", "0.001")
+    symbol = data.get("symbol", "BTCUSD")
+    size = data.get("size", "1")
     if action not in ["buy", "sell"]:
         return jsonify({"error": "Invalid action"}), 400
-    order = place_order(symbol, action, qty)
+    result = place_order(symbol, action, size)
+    logger.info(result)
     return jsonify({
         "status": "success",
         "action": action,
         "symbol": symbol,
-        "qty": qty,
-        "order_id": order.get("orderId"),
+        "result": result,
         "time": datetime.now().isoformat()
     }), 200
 
 @app.route("/", methods=["GET"])
 def home():
-    if TESTNET:
-        mode = "TESTNET"
-    else:
-        mode = "LIVE"
-    return jsonify({"status": "running", "mode": mode})
-
-@app.route("/balance", methods=["GET"])
-def balance():
-    usdt = get_balance("USDT")
-    btc = get_balance("BTC")
-    return jsonify({"USDT": usdt, "BTC": btc})
+    return jsonify({"status": "running", "exchange": "Delta Exchange India"})
 
 @app.route("/health", methods=["GET"])
 def health():
