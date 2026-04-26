@@ -23,28 +23,28 @@ DELTA_BASE_URL = "https://api.india.delta.exchange"
 DHAN_BASE_URL = "https://api.dhan.co"
 
 DELTA_SYMBOLS = {
-    "BTCUSD":   {"product_id": 27,   "size": 1},
-    "ETHUSD":   {"product_id": 3,    "size": 1},
-    "SOLUSD":   {"product_id": 1320, "size": 1},
-    "XRPUSD":   {"product_id": 66,   "size": 1},
-    "BNBUSD":   {"product_id": 11,   "size": 1},
-    "AVAXUSD":  {"product_id": 536,  "size": 1},
-    "LTCUSD":   {"product_id": 65,   "size": 1},
-    "DOTUSD":   {"product_id": 580,  "size": 1},
-    "ADAUSD":   {"product_id": 579,  "size": 1},
-    "BCHUSD":   {"product_id": 68,   "size": 1},
-    "TSLAXUSD": {"product_id": 100,  "size": 1},
-    "AAPLXUSD": {"product_id": 101,  "size": 1},
-    "NVDAXUSD": {"product_id": 102,  "size": 1},
-    "AMZNXUSD": {"product_id": 103,  "size": 1},
-    "METAXUSD": {"product_id": 104,  "size": 1},
-    "SPYXUSD":  {"product_id": 105,  "size": 1},
-    "QQQXUSD":  {"product_id": 106,  "size": 1}
+    "BTCUSD": {"product_id": 27, "size": 1},
+    "ETHUSD": {"product_id": 3, "size": 1},
+    "SOLUSD": {"product_id": 1320, "size": 1},
+    "XRPUSD": {"product_id": 66, "size": 1},
+    "BNBUSD": {"product_id": 11, "size": 1},
+    "AVAXUSD": {"product_id": 536, "size": 1},
+    "LTCUSD": {"product_id": 65, "size": 1},
+    "DOTUSD": {"product_id": 580, "size": 1},
+    "ADAUSD": {"product_id": 579, "size": 1},
+    "BCHUSD": {"product_id": 68, "size": 1},
+    "TSLAXUSD": {"product_id": 100, "size": 1},
+    "AAPLXUSD": {"product_id": 101, "size": 1},
+    "NVDAXUSD": {"product_id": 102, "size": 1},
+    "AMZNXUSD": {"product_id": 103, "size": 1},
+    "METAXUSD": {"product_id": 104, "size": 1},
+    "SPYXUSD": {"product_id": 105, "size": 1},
+    "QQQXUSD": {"product_id": 106, "size": 1}
 }
 
 DHAN_SYMBOLS = {
-    "NIFTY":     {"security_id": "13",  "lot_size": 75},
-    "BANKNIFTY": {"security_id": "25",  "lot_size": 15},
+    "NIFTY": {"security_id": "13", "lot_size": 75},
+    "BANKNIFTY": {"security_id": "25", "lot_size": 15},
     "MIDCAPNIFTY": {"security_id": "442", "lot_size": 75}
 }
 
@@ -136,15 +136,14 @@ def place_dhan_option_order(symbol, action, quantity=None):
         gap = 50 if symbol == "NIFTY" else 100
         strike, option_type = get_itm_strike(price, action, gap)
         today = date.today()
-        months = ["JAN","FEB","MAR","APR","MAY","JUN",
-                 "JUL","AUG","SEP","OCT","NOV","DEC"]
+        months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
         if today.month == 12:
             expiry_month = "JAN"
             expiry_year = str(today.year + 1)[2:]
         else:
             expiry_month = months[today.month]
             expiry_year = str(today.year)[2:]
-        trading_symbol = f"{symbol}{expiry_year}{expiry_month}{strike}{option_type}"
+        trading_symbol = symbol + expiry_year + expiry_month + str(strike) + option_type
         logger.info("Option symbol: " + trading_symbol)
         url = DHAN_BASE_URL + "/v2/orders"
         data = {
@@ -178,4 +177,51 @@ def webhook():
     if data.get("secret") != WH_SECRET:
         return jsonify({"error": "Unauthorized"}), 401
     action = data.get("action", "").lower()
-    symbol = data.get("symbol", "BTC
+    symbol = data.get("symbol", "BTCUSD").upper()
+    quantity = data.get("quantity", None)
+    if quantity:
+        quantity = int(quantity)
+    sl = data.get("sl", None)
+    tp = data.get("tp", None)
+    if action not in ["buy", "sell"]:
+        return jsonify({"error": "Invalid action"}), 400
+    if symbol in DELTA_SYMBOLS:
+        result = place_delta_order(symbol, action, sl, tp)
+        exchange = "Delta"
+    elif symbol in DHAN_SYMBOLS:
+        result = place_dhan_option_order(symbol, action, quantity)
+        exchange = "Dhan"
+    else:
+        return jsonify({"error": "Symbol not supported"}), 400
+    return jsonify({
+        "status": "success",
+        "exchange": exchange,
+        "action": action,
+        "symbol": symbol,
+        "result": result,
+        "time": datetime.now().isoformat()
+    }), 200
+
+@app.route("/symbols", methods=["GET"])
+def symbols():
+    return jsonify({
+        "crypto": ["BTCUSD","ETHUSD","SOLUSD","XRPUSD","BNBUSD","AVAXUSD","LTCUSD","DOTUSD","ADAUSD","BCHUSD"],
+        "stocks": ["TSLAXUSD","AAPLXUSD","NVDAXUSD","AMZNXUSD","METAXUSD","SPYXUSD","QQQXUSD"],
+        "indian_options": ["NIFTY","BANKNIFTY","MIDCAPNIFTY"]
+    })
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "running",
+        "delta_symbols": len(DELTA_SYMBOLS),
+        "dhan_symbols": len(DHAN_SYMBOLS)
+    })
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
