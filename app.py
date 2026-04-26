@@ -23,9 +23,29 @@ DELTA_BASE_URL = "https://api.india.delta.exchange"
 DHAN_BASE_URL = "https://api.dhan.co"
 
 DELTA_SYMBOLS = {
-    "BTCUSD": {"product_id": 27, "size": 5},
-    "ETHUSD": {"product_id": 3, "size": 5},
-    "SOLUSD": {"product_id": 1320, "size": 5}
+    "BTCUSD":   {"product_id": 27,   "size": 1},
+    "ETHUSD":   {"product_id": 3,    "size": 1},
+    "SOLUSD":   {"product_id": 1320, "size": 1},
+    "XRPUSD":   {"product_id": 66,   "size": 1},
+    "BNBUSD":   {"product_id": 11,   "size": 1},
+    "AVAXUSD":  {"product_id": 536,  "size": 1},
+    "LTCUSD":   {"product_id": 65,   "size": 1},
+    "DOTUSD":   {"product_id": 580,  "size": 1},
+    "ADAUSD":   {"product_id": 579,  "size": 1},
+    "BCHUSD":   {"product_id": 68,   "size": 1},
+    "TSLAXUSD": {"product_id": 100,  "size": 1},
+    "AAPLXUSD": {"product_id": 101,  "size": 1},
+    "NVDAXUSD": {"product_id": 102,  "size": 1},
+    "AMZNXUSD": {"product_id": 103,  "size": 1},
+    "METAXUSD": {"product_id": 104,  "size": 1},
+    "SPYXUSD":  {"product_id": 105,  "size": 1},
+    "QQQXUSD":  {"product_id": 106,  "size": 1}
+}
+
+DHAN_SYMBOLS = {
+    "NIFTY":     {"security_id": "13",  "lot_size": 75},
+    "BANKNIFTY": {"security_id": "25",  "lot_size": 15},
+    "MIDCAPNIFTY": {"security_id": "442", "lot_size": 75}
 }
 
 def get_delta_headers(method, path, body=""):
@@ -44,15 +64,21 @@ def get_delta_headers(method, path, body=""):
     }
 
 def set_delta_leverage(product_id, leverage=25):
-    path = "/v2/products/leverage"
-    url = DELTA_BASE_URL + path
-    data = {"product_id": product_id, "leverage": str(leverage)}
-    body = json.dumps(data)
-    headers = get_delta_headers("POST", path, body)
-    requests.post(url, data=body, headers=headers)
+    try:
+        path = "/v2/products/leverage"
+        url = DELTA_BASE_URL + path
+        data = {"product_id": product_id, "leverage": str(leverage)}
+        body = json.dumps(data)
+        headers = get_delta_headers("POST", path, body)
+        response = requests.post(url, data=body, headers=headers)
+        logger.info("Leverage: " + str(response.json()))
+    except Exception as e:
+        logger.error("Leverage error: " + str(e))
 
 def place_delta_order(symbol, side, sl=None, tp=None):
-    config = DELTA_SYMBOLS.get(symbol, {"product_id": 27, "size": 5})
+    config = DELTA_SYMBOLS.get(symbol)
+    if not config:
+        return {"error": "Symbol not found"}
     set_delta_leverage(config["product_id"], 25)
     path = "/v2/orders"
     url = DELTA_BASE_URL + path
@@ -74,56 +100,56 @@ def place_delta_order(symbol, side, sl=None, tp=None):
     logger.info("Delta Order: " + str(result))
     return result
 
-def get_itm_strike(nifty_price, action):
-    strike_gap = 50
+def get_itm_strike(price, action, gap=50):
     if action == "buy":
-        atm = math.floor(nifty_price / strike_gap) * strike_gap
-        itm_strike = atm - 100
-        option_type = "CE"
+        atm = math.floor(price / gap) * gap
+        return atm - 100, "CE"
     else:
-        atm = math.ceil(nifty_price / strike_gap) * strike_gap
-        itm_strike = atm + 100
-        option_type = "PE"
-    return itm_strike, option_type
+        atm = math.ceil(price / gap) * gap
+        return atm + 100, "PE"
 
-def get_nifty_price():
+def get_index_price(security_id):
     try:
         url = DHAN_BASE_URL + "/v2/marketfeed/ltp"
         headers = {
             "access-token": DHAN_ACCESS_TOKEN,
             "Content-Type": "application/json"
         }
-        data = {
-            "NSE_EQ": ["13"]
-        }
+        data = {"NSE_EQ": [security_id]}
         response = requests.post(url, json=data, headers=headers)
         result = response.json()
-        price = result["data"]["NSE_EQ"]["13"]["ltp"]
-        return float(price)
+        return float(result["data"]["NSE_EQ"][security_id]["ltp"])
     except Exception as e:
-        logger.error("Price fetch error: " + str(e))
-        return 23900.0
+        logger.error("Price error: " + str(e))
+        return None
 
-def place_dhan_option_order(action, quantity=75):
+def place_dhan_option_order(symbol, action, quantity=None):
     try:
-        nifty_price = get_nifty_price()
-        itm_strike, option_type = get_itm_strike(nifty_price, action)
+        config = DHAN_SYMBOLS.get(symbol)
+        if not config:
+            return {"error": "Symbol not found"}
+        if quantity is None:
+            quantity = config["lot_size"]
+        price = get_index_price(config["security_id"])
+        if not price:
+            return {"error": "Could not fetch price"}
+        gap = 50 if symbol == "NIFTY" else 100
+        strike, option_type = get_itm_strike(price, action, gap)
         today = date.today()
+        months = ["JAN","FEB","MAR","APR","MAY","JUN",
+                 "JUL","AUG","SEP","OCT","NOV","DEC"]
         if today.month == 12:
             expiry_month = "JAN"
             expiry_year = str(today.year + 1)[2:]
         else:
-            months = ["JAN","FEB","MAR","APR","MAY","JUN",
-                     "JUL","AUG","SEP","OCT","NOV","DEC"]
             expiry_month = months[today.month]
             expiry_year = str(today.year)[2:]
-        trading_symbol = f"NIFTY{expiry_year}{expiry_month}{itm_strike}{option_type}"
-        logger.info("Trading symbol: " + trading_symbol)
+        trading_symbol = f"{symbol}{expiry_year}{expiry_month}{strike}{option_type}"
+        logger.info("Option symbol: " + trading_symbol)
         url = DHAN_BASE_URL + "/v2/orders"
-        transaction_type = "BUY"
         data = {
             "dhanClientId": DHAN_CLIENT_ID,
-            "transactionType": transaction_type,
+            "transactionType": "BUY",
             "exchangeSegment": "NSE_FNO",
             "productType": "INTRADAY",
             "orderType": "MARKET",
@@ -138,10 +164,10 @@ def place_dhan_option_order(action, quantity=75):
         }
         response = requests.post(url, json=data, headers=headers)
         result = response.json()
-        logger.info("Dhan Option Order: " + str(result))
+        logger.info("Dhan Option: " + str(result))
         return result
     except Exception as e:
-        logger.error("Dhan order error: " + str(e))
+        logger.error("Dhan error: " + str(e))
         return {"error": str(e)}
 
 @app.route("/webhook", methods=["POST"])
@@ -152,42 +178,4 @@ def webhook():
     if data.get("secret") != WH_SECRET:
         return jsonify({"error": "Unauthorized"}), 401
     action = data.get("action", "").lower()
-    symbol = data.get("symbol", "BTCUSD").upper()
-    quantity = int(data.get("quantity", 75))
-    sl = data.get("sl", None)
-    tp = data.get("tp", None)
-    if action not in ["buy", "sell"]:
-        return jsonify({"error": "Invalid action"}), 400
-    if symbol in DELTA_SYMBOLS:
-        result = place_delta_order(symbol, action, sl, tp)
-        exchange = "Delta"
-    elif symbol == "NIFTY":
-        result = place_dhan_option_order(action, quantity)
-        exchange = "Dhan Options"
-    else:
-        return jsonify({"error": "Symbol not supported"}), 400
-    return jsonify({
-        "status": "success",
-        "exchange": exchange,
-        "action": action,
-        "symbol": symbol,
-        "result": result,
-        "time": datetime.now().isoformat()
-    }), 200
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "running",
-        "exchanges": ["Delta Exchange", "Dhan Options"],
-        "crypto": ["BTCUSD", "ETHUSD", "SOLUSD"],
-        "options": ["NIFTY Monthly ITM"]
-    })
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    symbol = data.get("symbol", "BTC
